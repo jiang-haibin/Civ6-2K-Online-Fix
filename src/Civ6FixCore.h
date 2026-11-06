@@ -65,6 +65,7 @@ struct BuildProfile {
     std::uint32_t mutexOwnerOffset;
     std::uint32_t mutexCountOffset;
     std::uint32_t opensslLockIndex;
+    bool verifyUnlockCallback = false;
 };
 
 inline constexpr BuildProfile kVerifiedDx11Profile{
@@ -113,10 +114,69 @@ inline constexpr BuildProfile kDx12Profile{
     18,
 };
 
-inline constexpr std::array<const BuildProfile*, 2> kKnownBuildProfiles{
+// New builds remain read-only until static targets and live runtime state agree.
+inline constexpr BuildProfile kUpdatedDx11Profile{
+    L"civ6-win64steam-1.0.12.72-dx11", L"CivilizationVI.exe",
+    L"D1A0CFD439E7451BE515F47595CFA0B6B983F56D1FAF4EA434A4CE3B21491EBE",
+    Renderer::DirectX11, SupportState::ReadOnlyCandidate,
+    21189480, 0x6AE8EA29, 0x140000000, 0x0370C000, 0x8120,
+    0x00F97E70, 0x00BCF1E5, 0x03552668, 0x03552700, 0x03552598,
+    0x48, 0x4C, 18, true,
+};
+inline constexpr BuildProfile kUpdatedDx12Profile{
+    L"civ6-win64steam-1.0.12.72-dx12", L"CivilizationVI_DX12.exe",
+    L"1ADB1A2BCA31F9DB6BE14D6E22D30D2DFCB6DCD8DE3ABD9A81E7BEA396B39417",
+    Renderer::DirectX12, SupportState::Verified,
+    21420896, 0x6AE8DE31, 0x140000000, 0x0FE5D000, 0x8120,
+    0x00FA6E78, 0x00BDD8F5, 0x0FCA1FE8, 0x0FCA2080, 0x0FCA1F18,
+    0x48, 0x4C, 18, true,
+};
+
+inline constexpr std::array<const BuildProfile*, 4> kKnownBuildProfiles{
     &kVerifiedDx11Profile,
     &kDx12Profile,
+    &kUpdatedDx11Profile,
+    &kUpdatedDx12Profile,
 };
+
+// Exact callback instructions, with only the four RIP-relative displacements omitted.
+inline constexpr std::array<std::uint8_t, 59> kUnlockCallbackCode{
+    0x48,0x83,0xEC,0x28, 0x48,0x8B,0x05,0,0,0,0,
+    0xF6,0xC1,0x01, 0x48,0x63,0xCA, 0x48,0x8B,0x0C,0xC8, 0x74,0x08,
+    0xFF,0x15,0,0,0,0, 0xEB,0x06, 0xFF,0x15,0,0,0,0,
+    0x85,0xC0,0x74,0x0D,0x8B,0xC8,0x48,0x83,0xC4,0x28,
+    0x48,0xFF,0x25,0,0,0,0, 0x48,0x83,0xC4,0x28,0xC3,
+};
+
+inline bool MatchesUnlockCallback(const BuildProfile& profile,
+                                  const std::array<std::uint8_t, 59>& code) noexcept {
+    if (profile.opensslUnlockReturnRva < 37 || profile.mtxUnlockIatRva < 0x30) return false;
+    constexpr std::array<std::size_t, 4> operands{7, 25, 33, 50};
+    for (std::size_t i = 0; i < code.size(); ++i) {
+        bool displacement = false;
+        for (const auto offset : operands) {
+            if (i >= offset && i < offset + 4) {
+                displacement = true;
+                break;
+            }
+        }
+        if (!displacement && code[i] != kUnlockCallbackCode[i]) return false;
+    }
+    const std::array<std::uintptr_t, 4> targets{
+        profile.opensslLockVectorRva, profile.mtxUnlockIatRva + 8,
+        profile.mtxUnlockIatRva, profile.mtxUnlockIatRva - 0x30,
+    };
+    for (std::size_t i = 0; i < operands.size(); ++i) {
+        const auto offset = operands[i];
+        std::uint32_t encoded = 0;
+        for (std::size_t j = 0; j < 4; ++j) encoded |= std::uint32_t(code[offset + j]) << (8 * j);
+        const std::int64_t displacement = (encoded & 0x80000000U) ?
+            std::int64_t(encoded) - 0x100000000LL : std::int64_t(encoded);
+        const auto target = std::int64_t(profile.opensslUnlockReturnRva - 37 + offset + 4) + displacement;
+        if (target < 0 || std::uint64_t(target) != targets[i]) return false;
+    }
+    return true;
+}
 
 inline bool EqualsInsensitive(std::wstring_view left,
                               std::wstring_view right) noexcept {

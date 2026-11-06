@@ -1,21 +1,25 @@
 # 开发与发布说明
 
-本文面向希望构建、审阅或贡献代码的开发者，记录公开且长期有效的维护规则。
+本文面向希望构建、审阅或贡献代码的开发者。此仓库是 yeeesy 上游 v1.1.0 的社区分支，新增配置依据见 [TECHNICAL.md](TECHNICAL.md)，当前实测边界见 [VALIDATION.md](VALIDATION.md)。历史上游 Review 和发布说明不代表本次分支已完成相同范围的人工审阅。
 
 ## 版本与构建
 
 产品版本只在根目录 `version.json` 中维护。构建脚本会由它生成程序身份与 Windows 版本资源，并在构建结束时核对结果。
 
-需要 Windows 10/11、Visual Studio 2022 C++ x64 工具链、Windows SDK 和 PowerShell：
+需要 Windows 10/11 x64、Visual Studio 2022 C++ x64 工具链、Windows SDK、MSBuild/Roslyn C# 编译器和 PowerShell 7：
 
 ```powershell
 & '.\build.ps1' -Analyze
 & '.\build\Civ6_2K_Online_Fix.exe' --self-test
 & '.\package.ps1'
-& '.\dist\Civ6_2K_Online_Fix_1.1.0\verify_hashes.ps1'
+$identity = Get-Content ./version.json -Raw | ConvertFrom-Json
+$package = "./dist/$($identity.PackageBaseName)_$($identity.Version)"
+& "$package/verify_hashes.ps1"
 ```
 
-发布包还应从包内 `source` 目录在另一绝对路径重新构建，并确认重建程序与包内程序逐字节一致。
+发布包还应从包内 `source` 目录在另一绝对路径重新构建，并确认修复器和启动器两个 EXE 都与包内程序逐字节一致；CI 执行此检查。构建时生成 C++ 版本头、清单及 C# 版本特性，不手工维护多份工具版本。
+
+`-Mingw` 是供缺少 Visual Studio 的机器使用的开发路径。它运行回归并生成如实的构建清单，但没有 MSVC 原生分析、CFG/CET 和确定性声明；`package.ps1` 仍要求 MSVC `/analyze`、已执行测试和两程序的确定性构建，不允许用开关绕过。不要把本机开发 EXE 混入正式 CI 包。
 
 ## 不得放宽的边界
 
@@ -43,10 +47,23 @@
 1. 检查 `version.json`、README、更新记录和包名一致；
 2. 在干净环境执行警告即错误构建、全部测试、MSVC `/analyze` 和离线自检；
 3. 生成发布包并验证完整文件集合与 SHA-256 清单；
-4. 从包内源码异路径重建并进行逐字节比较；
+4. 从包内源码异路径重建两个 EXE 并逐字节比较；
 5. 扫描公开源码与归档，确认无个人路径、账号数据、凭据、原始日志、游戏文件或内部工作资料；
 6. 确认 GitHub Actions 使用最小权限，第三方 Action 固定到完整提交；
 7. 只发布正式 ZIP 和对应的外部 SHA-256 文件。
+
+包内 `build_manifest.json` 区分四个 Profile 的支持状态与证据来源，新版 DX11 必须保持 `ReadOnlyCandidate`。清单记录两个 EXE 的哈希、测试数量和编译能力；打包器核对它们并拒绝缺少程序、身份不一致、目录重解析点和敏感后缀文件。包不含 Git 元数据、个人日志或机器配置。
+
+## GitHub 发布
+
+本分支地址为 [jiang-haibin/Civ6-2K-Online-Fix](https://github.com/jiang-haibin/Civ6-2K-Online-Fix)。默认工作流只读仓库内容，不自动创建 Release，也不使用 `pull_request_target`；依赖 Action 固定完整提交，checkout 不保留凭据。
+
+1. 审查待提交的精确文件集合、MIT 归属和公开隐私；推送正常提交，不重写已有远端历史。
+2. 等对应提交的 Windows CI 全绿；从该次运行下载 `windows-release` 工件，核对提交、ZIP 外部哈希和解压后完整文件集合。
+3. 为该提交创建带 `community` 标记的版本标签。Release 正文写明继承关系、适用哈希、DX12 单机验证、DX11 只读以及尚未验证完整对局。
+4. 仅上传这次成功 CI 产生的 ZIP 和 `.zip.sha256`。不得把开发构建的分析/复现能力写成已通过，也不得把旧的日志或部署目录整体压缩上传。
+
+新增脚本应有明确必要性。本分支仅新增一个启动器源码和一个对应测试文件，沿用既有构建、打包、校验脚本；测试生成的占位源码和 EXE 在临时目录创建并清理。
 
 当前发布未使用商业 Authenticode 代码签名，因此 SmartScreen 的未知发布者提示属于预期现象。不要使用自签名证书伪装成公开信任，也不得把任何签名私钥放入仓库、源码包或 CI 日志。
 

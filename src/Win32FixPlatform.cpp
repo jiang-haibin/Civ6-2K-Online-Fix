@@ -1086,14 +1086,12 @@ RuntimeValidationResult Win32FixPlatform::ValidateRuntime(
     std::uintptr_t originalTarget = 0;
     std::filesystem::path runtimePath;
     const std::uint64_t iatWaitStarted = GetTickCount64();
-    std::uintptr_t lastCandidate = 0;
     std::uintptr_t lastLoggedCandidate = static_cast<std::uintptr_t>(-1);
     std::wstring lastOwner = L"尚未解析";
     for (;;) {
         std::uintptr_t candidate = 0;
         bool exactTargetObserved = false;
         if (ReadRemote(impl_->process.Get(), iatAddress, candidate)) {
-            lastCandidate = candidate;
             if (candidate == 0) {
                 lastOwner = L"空指针";
             } else if (candidate >= mainModule->base &&
@@ -1172,6 +1170,19 @@ RuntimeValidationResult Win32FixPlatform::ValidateRuntime(
                     L"目标在 IAT 校验前退出。"};
         }
         Sleep(2);
+    }
+
+    if (profile.verifyUnlockCallback) {
+        std::array<std::uint8_t, 59> callback{};
+        if (profile.opensslUnlockReturnRva < 37 ||
+            !ReadRemote(impl_->process.Get(), mainModule->base +
+                        profile.opensslUnlockReturnRva - 37, callback) ||
+            !MatchesUnlockCallback(profile, callback)) {
+            impl_->process.Reset();
+            return {RuntimeValidationOutcome::PeIdentityMismatch, ERROR_INVALID_DATA,
+                    L"OpenSSL 回调指令或锁表/IAT 目标与新版适配不一致；未写入进程。"};
+        }
+        impl_->logger.Event("unlock_callback_verified", "\"writes\":false");
     }
 
     const std::uintptr_t vectorAddress =

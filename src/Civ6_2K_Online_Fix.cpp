@@ -72,10 +72,22 @@ void ConsoleLine(std::wstring_view text) {
 
 class ConsoleObserver final : public civ6fix::ISessionObserver {
 public:
+    explicit ConsoleObserver(civ6fix::Logger& logger) : logger_(logger) {}
     void OnSessionStatus(const civ6fix::SessionStatus& status) override {
+        if (status.phase == civ6fix::SessionPhase::Listening) {
+            logger_.Event("listener_ready");
+        }
+        if (status.phase == civ6fix::SessionPhase::Completed) {
+            logger_.Event("session_completed", "\"result\":" + std::to_string(static_cast<int>(status.result)) +
+                ",\"discovery\":" + std::to_string(status.discoveryState) +
+                ",\"sso\":" + std::to_string(status.ssoState) +
+                ",\"interceptions\":" + std::to_string(status.skippedInvalidUnlocks));
+        }
         const auto presentation = civ6fix::PresentSessionStatus(status);
         ConsoleLine(presentation.headline + L"：" + presentation.detail);
     }
+private:
+    civ6fix::Logger& logger_;
 };
 
 struct CommandLineOptions {
@@ -222,7 +234,7 @@ int RunDiagnosis(civ6fix::Logger& logger) {
 }
 
 int RunHeadless(civ6fix::Logger& logger, bool autoLaunchSteam) {
-    ConsoleObserver observer;
+    ConsoleObserver observer(logger);
     civ6fix::Win32FixPlatform platform(logger);
     civ6fix::SessionOptions options;
     options.launchViaSteam = autoLaunchSteam;

@@ -4,7 +4,9 @@
 
 ## 开发与验证
 
-需要 Windows 10/11、Visual Studio 2022 C++ x64 工具链、Windows SDK 和 PowerShell。
+本仓库是 yeeesy 项目的社区分支，请向本分支反馈本分支的改动；提交补丁时保留原作者署名与 MIT 许可证。
+
+正式验证需要 Windows x64、PowerShell 7、Visual Studio 2022 C++ x64 工具链、Windows SDK 和 MSBuild/Roslyn C# 编译器。MinGW 只用于开发验证，不能冒充正式发布检查。
 
 ```powershell
 & '.\build.ps1' -Analyze
@@ -27,7 +29,7 @@
 
 请求支持新游戏构建时，请提供官方版本、渠道、EXE 名、大小、SHA-256 和已经脱敏的只读诊断摘要。不要上传游戏 EXE 或原始 JSONL。
 
-新配置必须先保持只读。只有在身份、目标位置、正常流程和负向流程均得到独立验证后，才可考虑启用修复。详细规则见 [`docs/MAINTAINER.md`](docs/MAINTAINER.md)。
+新配置必须先保持只读。只有在身份、目标位置、正常流程和负向流程均得到独立验证后，才可考虑启用修复。当前新版 DX11 仍是只读候选，不要为了“两个都支持”直接改枚举。详细规则见 [`docs/MAINTAINER.md`](docs/MAINTAINER.md)，现有证据见 [`docs/VALIDATION.md`](docs/VALIDATION.md)。
 
 ## Pull Request
 

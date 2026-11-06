@@ -52,6 +52,7 @@ if (-not $NoArchive -and (Test-Path -LiteralPath $archiveChecksumPath)) {
 }
 
 $appSource = Join-Path $buildRoot 'Civ6_2K_Online_Fix.exe'
+$launcherSource = Join-Path $buildRoot 'Civ6-Start.exe'
 $manifestSource = Join-Path $buildRoot 'build_manifest.json'
 $packageDocuments = @(
     'README.md'
@@ -75,10 +76,10 @@ $sourceRootFiles = @(
     '.gitignore'
     '.editorconfig'
 )
-$requiredFiles = @($appSource, $manifestSource, (Join-Path $projectRoot 'logs_README.txt'))
+$requiredFiles = @($appSource, $launcherSource, $manifestSource, (Join-Path $projectRoot 'logs_README.txt'))
 $requiredFiles += $packageDocuments | ForEach-Object { Join-Path $projectRoot $_ }
 $requiredFiles += $sourceRootFiles | ForEach-Object { Join-Path $projectRoot $_ }
-$requiredDirectories = @('src', 'tests', 'docs', '.github') |
+$requiredDirectories = @('src', 'launcher', 'tests', 'docs', '.github') |
     ForEach-Object { Join-Path $projectRoot $_ }
 
 foreach ($path in $requiredFiles) {
@@ -112,7 +113,7 @@ foreach ($path in $packageInputs) {
 
 $forbiddenSourceSuffixes = @(
     '.dll', '.dmp', '.env', '.exe', '.jsonl', '.key', '.log', '.obj',
-    '.p12', '.pdb', '.pem', '.pfx', '.res', '.snk', '.zip'
+    '.o', '.p12', '.pdb', '.pem', '.pfx', '.res', '.snk', '.zip'
 )
 $sourceTreeFiles = @($requiredDirectories | ForEach-Object {
     Get-ChildItem -LiteralPath $_ -File -Recurse -Force
@@ -127,31 +128,52 @@ if ($null -ne $forbiddenSourceFile) {
 }
 
 $buildManifest = Get-Content -LiteralPath $manifestSource -Raw | ConvertFrom-Json
-$dx11Profiles = @($buildManifest.BuildProfiles | Where-Object Renderer -eq 'DX11')
-$dx12Profiles = @($buildManifest.BuildProfiles | Where-Object Renderer -eq 'DX12')
+$expectedProfiles = @(
+    @('civ6-win64steam-1.0.12.68-dx11', 'DX11', 'Verified', 'Upstream',
+      'E7450823CC8E00468CFF7B9D7B97C63140EAE38AE1D774BA4EFA437556C42D63'),
+    @('civ6-win64steam-1.0.12.68-dx12', 'DX12', 'Verified', 'Upstream',
+      'C2C3D40B86260A541D8A4D38CB70D50D3406AE1DE374AFC382D1E42BC1342F1E'),
+    @('civ6-win64steam-1.0.12.72-dx11', 'DX11', 'ReadOnlyCandidate', 'StaticOnly',
+      'D1A0CFD439E7451BE515F47595CFA0B6B983F56D1FAF4EA434A4CE3B21491EBE'),
+    @('civ6-win64steam-1.0.12.72-dx12', 'DX12', 'Verified', 'LocalRuntimeAndLobbyList',
+      '1ADB1A2BCA31F9DB6BE14D6E22D30D2DFCB6DCD8DE3ABD9A81E7BEA396B39417')
+)
+if (@($buildManifest.BuildProfiles).Count -ne $expectedProfiles.Count) {
+    throw 'Release manifest must contain exactly the four reviewed profiles.'
+}
+foreach ($expected in $expectedProfiles) {
+    $actual = @($buildManifest.BuildProfiles | Where-Object Id -eq $expected[0])
+    if ($actual.Count -ne 1 -or $actual[0].Renderer -ne $expected[1] -or
+        $actual[0].SupportState -ne $expected[2] -or $actual[0].Evidence -ne $expected[3] -or
+        $actual[0].SHA256 -ne $expected[4]) {
+        throw "Release profile contract mismatch: $($expected[0])"
+    }
+}
 if ($buildManifest.Version -ne $productVersion -or
     $buildManifest.WindowsVersion -ne $windowsVersion -or
     $buildManifest.PackageBaseName -ne $packageBaseName -or
     $buildManifest.VersionSource -ne 'version.json' -or
-    $buildManifest.BuildFlavor -ne 'public-verified-dx11-dx12' -or
+    $buildManifest.BuildFlavor -ne 'community-mixed-support' -or
     -not $buildManifest.Dx12WriteEnabled -or
-    $dx11Profiles.Count -ne 1 -or
-    $dx11Profiles[0].Id -ne 'civ6-win64steam-1.0.12.68-dx11' -or
-    $dx11Profiles[0].SupportState -ne 'Verified' -or
-    $dx11Profiles[0].SHA256 -ne 'E7450823CC8E00468CFF7B9D7B97C63140EAE38AE1D774BA4EFA437556C42D63' -or
-    $dx12Profiles.Count -ne 1 -or
-    $dx12Profiles[0].Id -ne 'civ6-win64steam-1.0.12.68-dx12' -or
-    $dx12Profiles[0].SupportState -ne 'Verified' -or
-    $dx12Profiles[0].SHA256 -ne 'C2C3D40B86260A541D8A4D38CB70D50D3406AE1DE374AFC382D1E42BC1342F1E' -or
+    $buildManifest.Toolchain -ne 'MSVC' -or
     -not $buildManifest.TestsRun -or
     $buildManifest.TestCount -lt 1 -or
     -not $buildManifest.NativeAnalysis -or
-    -not $buildManifest.ReproducibleBuild) {
-    throw "Release packaging requires the exact DX11/DX12 Verified public profiles, version $productVersion from version.json, executed tests, NativeAnalysis=true, and ReproducibleBuild=true."
+    -not $buildManifest.ReproducibleBuild -or
+    -not $buildManifest.Launcher.Deterministic) {
+    throw "Release packaging requires the exact mixed-support profiles, version $productVersion, executed tests, MSVC /analyze, and deterministic helper + launcher builds. MinGW is development-only."
 }
 $builtHash = (Get-FileHash -LiteralPath $appSource -Algorithm SHA256).Hash
 if ($builtHash -ne $buildManifest.SHA256) {
     throw 'Executable hash does not match build_manifest.json.'
+}
+$launcherHash = (Get-FileHash -LiteralPath $launcherSource -Algorithm SHA256).Hash
+if ($buildManifest.Executable -ne 'Civ6_2K_Online_Fix.exe' -or
+    $buildManifest.Launcher.Executable -ne 'Civ6-Start.exe' -or
+    (Get-Item -LiteralPath $appSource).Length -ne $buildManifest.Length -or
+    (Get-Item -LiteralPath $launcherSource).Length -ne $buildManifest.Launcher.Length -or
+    $launcherHash -ne $buildManifest.Launcher.SHA256) {
+    throw 'Helper or launcher identity does not match build_manifest.json.'
 }
 
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
@@ -160,6 +182,7 @@ $logsTarget = Join-Path $packageRoot 'logs'
 New-Item -ItemType Directory -Path $packageRoot,$sourceTarget,$logsTarget | Out-Null
 
 Copy-Item -LiteralPath $appSource -Destination (Join-Path $packageRoot 'Civ6_2K_Online_Fix.exe')
+Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $packageRoot 'Civ6-Start.exe')
 Copy-Item -LiteralPath $manifestSource -Destination (Join-Path $packageRoot 'build_manifest.json')
 foreach ($name in $packageDocuments) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $packageRoot
@@ -170,7 +193,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'logs_README.txt') -Destination (
 foreach ($name in $sourceRootFiles) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $sourceTarget
 }
-foreach ($name in @('src', 'tests', 'docs', '.github')) {
+foreach ($name in @('src', 'launcher', 'tests', 'docs', '.github')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $sourceTarget -Recurse
 }
 
@@ -211,6 +234,7 @@ if (-not $NoArchive) {
     PackageRoot = $packageRoot
     PackageFileCount = (@(Get-ChildItem -LiteralPath $packageRoot -File -Recurse)).Count
     ExecutableSHA256 = $builtHash
+    LauncherSHA256 = $launcherHash
     HashList = $hashPath
     Archive = if ($NoArchive) { $null } else { $archivePath }
     ArchiveSHA256 = $archiveHash

@@ -12,6 +12,9 @@ labels: bug
 - Steam game version:
 - Renderer actually launched: DX11 / DX12 / unknown
 - Mode: GUI / watch-only / no-gui / diagnose
+- Steam wrapper enabled: yes / no (remove personal paths before sharing launch options)
+
+This is the jiang-haibin community fork. New 1.0.12.72 DX11 is read-only; DX12 has local login/lobby-list verification. Please confirm the compatibility table in README before reporting.
 
 ## What happened
 

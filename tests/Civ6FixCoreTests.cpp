@@ -868,6 +868,64 @@ int main() {
             civ6fix::kDx12Profile.mutexCountOffset == 0x4CU &&
             civ6fix::kDx12Profile.opensslLockIndex == 18U,
         "DX12 Verified Profile keeps its complete audited contract");
+    const auto* updatedDx11 = civ6fix::FindBuildProfile(
+        L"CivilizationVI.exe",
+        L"D1A0CFD439E7451BE515F47595CFA0B6B983F56D1FAF4EA434A4CE3B21491EBE");
+    const auto* updatedDx12 = civ6fix::FindBuildProfile(
+        L"CivilizationVI_DX12.exe",
+        L"1ADB1A2BCA31F9DB6BE14D6E22D30D2DFCB6DCD8DE3ABD9A81E7BEA396B39417");
+    tests.Expect(updatedDx11 != nullptr && updatedDx12 != nullptr &&
+                     civ6fix::DecideBuildUse(updatedDx11) == civ6fix::BuildUseDecision::ObserveCandidateReadOnly &&
+                     civ6fix::DecideBuildUse(updatedDx12) == civ6fix::BuildUseDecision::InstallVerifiedGuard,
+                 "runtime-validated updated DX12 may write while untested DX11 stays read-only");
+    tests.Expect(updatedDx11 != nullptr && updatedDx11->fileSize == 21189480 &&
+                     updatedDx11->peTimestamp == 0x6AE8EA29 && updatedDx11->imageSize == 0x0370C000 &&
+                     updatedDx11->mtxUnlockIatRva == 0x00F97E70 &&
+                     updatedDx11->opensslUnlockReturnRva == 0x00BCF1E5 &&
+                     updatedDx11->opensslLockVectorRva == 0x03552668 &&
+                     updatedDx11->discoveryGlobalRva == 0x03552700 && updatedDx11->ssoGlobalRva == 0x03552598,
+                 "updated DX11 profile uses the independently inspected executable contract");
+    tests.Expect(updatedDx12 != nullptr && updatedDx12->fileSize == 21420896 &&
+                     updatedDx12->peTimestamp == 0x6AE8DE31 && updatedDx12->imageSize == 0x0FE5D000 &&
+                     updatedDx12->mtxUnlockIatRva == 0x00FA6E78 &&
+                     updatedDx12->opensslUnlockReturnRva == 0x00BDD8F5 &&
+                     updatedDx12->opensslLockVectorRva == 0x0FCA1FE8 &&
+                     updatedDx12->discoveryGlobalRva == 0x0FCA2080 && updatedDx12->ssoGlobalRva == 0x0FCA1F18,
+                 "updated DX12 profile uses the independently inspected executable contract");
+    tests.Expect(civ6fix::FindBuildProfile(L"CivilizationVI.exe",
+                     L"1ADB1A2BCA31F9DB6BE14D6E22D30D2DFCB6DCD8DE3ABD9A81E7BEA396B39417") == nullptr &&
+                     civ6fix::FindBuildProfile(L"CivilizationVI_DX12.exe",
+                     L"D1A0CFD439E7451BE515F47595CFA0B6B983F56D1FAF4EA434A4CE3B21491EBE") == nullptr,
+                 "new executable hashes cannot be paired with the wrong renderer");
+    for (const auto* profile : {updatedDx11, updatedDx12}) {
+        if (profile == nullptr) continue;
+        auto callback = civ6fix::kUnlockCallbackCode;
+        const std::array<std::size_t, 4> offsets{7, 25, 33, 50};
+        const std::array<std::uintptr_t, 4> targets{profile->opensslLockVectorRva,
+            profile->mtxUnlockIatRva + 8, profile->mtxUnlockIatRva, profile->mtxUnlockIatRva - 0x30};
+        for (std::size_t i = 0; i < offsets.size(); ++i) {
+            const auto displacement = static_cast<std::uint32_t>(targets[i] -
+                (profile->opensslUnlockReturnRva - 37 + offsets[i] + 4));
+            for (std::size_t j = 0; j < 4; ++j) callback[offsets[i] + j] =
+                static_cast<std::uint8_t>(displacement >> (8 * j));
+        }
+        tests.Expect(profile->verifyUnlockCallback && civ6fix::MatchesUnlockCallback(*profile, callback),
+                     "new profiles require exact callback instructions and relative targets");
+        callback[31] ^= 1;
+        tests.Expect(!civ6fix::MatchesUnlockCallback(*profile, callback),
+                     "changed unlock instruction fails the callback contract");
+        callback[31] ^= 1;
+        callback[7] ^= 1;
+        tests.Expect(!civ6fix::MatchesUnlockCallback(*profile, callback),
+                     "wrong lock-vector displacement fails the callback contract");
+        callback[7] ^= 1;
+        for (const auto offset : {25U, 33U, 50U}) {
+            callback[offset] ^= 1;
+            tests.Expect(!civ6fix::MatchesUnlockCallback(*profile, callback),
+                         "wrong lock/unlock/throw IAT displacement fails the callback contract");
+            callback[offset] ^= 1;
+        }
+    }
     civ6fix::BuildProfile experimentalDx12 = civ6fix::kDx12Profile;
     experimentalDx12.supportState = civ6fix::SupportState::Experimental;
     tests.Expect(

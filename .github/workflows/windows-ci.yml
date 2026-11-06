@@ -38,21 +38,37 @@ jobs:
       - name: Exercise release packaging and checksums
         shell: pwsh
         run: |
-          ./package.ps1 -OutputName ci-package -AllowNonReleaseName
-          ./dist/ci-package/verify_hashes.ps1
+          ./package.ps1
+          $identity = Get-Content ./version.json -Raw | ConvertFrom-Json
+          $package = "./dist/$($identity.PackageBaseName)_$($identity.Version)"
+          & "$package/verify_hashes.ps1"
 
       - name: Rebuild from packaged source
         shell: pwsh
         run: |
-          Push-Location './dist/ci-package/source'
+          $identity = Get-Content ./version.json -Raw | ConvertFrom-Json
+          $package = "./dist/$($identity.PackageBaseName)_$($identity.Version)"
+          Push-Location "$package/source"
           try {
             ./build.ps1 -Analyze
           }
           finally {
             Pop-Location
           }
-          $packagedHash = (Get-FileHash './dist/ci-package/Civ6_2K_Online_Fix.exe' -Algorithm SHA256).Hash
-          $rebuiltHash = (Get-FileHash './dist/ci-package/source/build/Civ6_2K_Online_Fix.exe' -Algorithm SHA256).Hash
-          if ($rebuiltHash -ne $packagedHash) {
-            throw "Packaged-source rebuild is not byte-for-byte reproducible: $packagedHash != $rebuiltHash"
+          foreach ($name in @('Civ6_2K_Online_Fix.exe', 'Civ6-Start.exe')) {
+            $packagedHash = (Get-FileHash "$package/$name" -Algorithm SHA256).Hash
+            $rebuiltHash = (Get-FileHash "$package/source/build/$name" -Algorithm SHA256).Hash
+            if ($rebuiltHash -ne $packagedHash) {
+              throw "Packaged-source rebuild differs for ${name}: $packagedHash != $rebuiltHash"
+            }
           }
+
+      - name: Upload verified release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-release
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
