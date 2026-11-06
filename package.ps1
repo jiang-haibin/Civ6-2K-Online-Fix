@@ -63,6 +63,7 @@ $packageDocuments = @(
     'verify_hashes.ps1'
 )
 $sourceRootFiles = @(
+    'logs_README.txt'
     'README.md'
     'CHANGELOG.md'
     'LICENSE'

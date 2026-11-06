@@ -42,6 +42,14 @@ jobs:
           $identity = Get-Content ./version.json -Raw | ConvertFrom-Json
           $package = "./dist/$($identity.PackageBaseName)_$($identity.Version)"
           & "$package/verify_hashes.ps1"
+          $sourceRoot = [IO.Path]::GetFullPath("$package/source")
+          $expected = @(git ls-files)
+          $actual = @(Get-ChildItem $sourceRoot -File -Recurse -Force | ForEach-Object {
+            [IO.Path]::GetRelativePath($sourceRoot, $_.FullName).Replace('\', '/')
+          })
+          if (Compare-Object $expected $actual) {
+            throw 'Packaged source does not contain the exact tracked source file set.'
+          }
 
       - name: Rebuild from packaged source
         shell: pwsh
@@ -51,6 +59,8 @@ jobs:
           Push-Location "$package/source"
           try {
             ./build.ps1 -Analyze
+            ./package.ps1 -OutputName source-check -AllowNonReleaseName -NoArchive
+            ./dist/source-check/verify_hashes.ps1
           }
           finally {
             Pop-Location
